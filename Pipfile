@@ -8,6 +8,7 @@ pypdf = "*"
 pytest = "*"
 reportlab = "*"
 pdfgen = "*"
+requests = "*"
 
 [dev-packages]
 
