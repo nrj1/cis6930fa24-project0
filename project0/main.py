@@ -1,122 +1,145 @@
-import io
-import re
-import requests
 import sqlite3
 import os
-import argparse
+import urllib.request
 from pypdf import PdfReader
+import re
+import argparse
 
-class IncidentRecord:
-    def __init__(self, time, number, location, nature, ori):
-        self.time = time
-        self.number = number
-        self.location = location
-        self.nature = nature
-        self.ori = ori
+# Function to fetch and save PDF from URL
 
-    @classmethod
-    def display_info(cls, record):
-        for attr, value in record.__dict__.items():
-            print(f"{attr}: {value}")
-
-DB_NAME = "resources/normanpd.db"
-CREATE_TABLE_QUERY = '''
-CREATE TABLE IF NOT EXISTS police_incidents (
-    incident_time TEXT,
-    incident_number TEXT,
-    incident_location TEXT,
-    incident_nature TEXT,
-    incident_ori TEXT
-);
-'''
-INSERT_QUERY = '''
-INSERT INTO police_incidents 
-(incident_time, incident_number, incident_location, incident_nature, incident_ori)
-VALUES (?, ?, ?, ?, ?)
-'''
-NATURE_COUNT_QUERY = '''
-SELECT incident_nature, COUNT(*) as nature_count 
-FROM police_incidents 
-GROUP BY incident_nature 
-ORDER BY nature_count DESC, 
-    CASE WHEN incident_nature = '' THEN 1 ELSE 0 END, 
-    incident_nature
-'''
-
-def fetch_and_parse_pdf(url):
-    response = requests.get(url)
-    if response.status_code != 200:
-        raise Exception("Failed to fetch PDF from URL")
+def fetchincidents(url, filename):
+    # Get the path to the tmp directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))  # project0 directory
+    parent_dir = os.path.dirname(current_dir)  # parent directory containing project0 and tmp
+    tmp_dir = os.path.join(parent_dir, 'tmp')
     
-    pdf_reader = PdfReader(io.BytesIO(response.content))
+    # Ensure the tmp directory exists
+    os.makedirs(tmp_dir, exist_ok=True)
+    
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    request = urllib.request.Request(url, headers=headers)
+    filepath = os.path.join(tmp_dir, filename)
+    
+    with urllib.request.urlopen(request) as response:
+        data = response.read()
+        # Save the PDF data to a file
+        with open(filepath, 'wb') as file:
+            file.write(data)
+    print(f"PDF downloaded and saved as {filename} in tmp folder")
+
+# Function to extract text from the downloaded PDF
+
+def extract_text_from_pdf(filename):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    tmp_dir = os.path.join(parent_dir, 'tmp')
+    filepath = os.path.join(tmp_dir, filename)
+    reader = PdfReader(filepath)
+    text = "" 
+    for page in reader.pages:
+        text += page.extract_text()
+    return text
+
+
+
+def create_db(db_name):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    resources_dir = os.path.join(parent_dir, 'resources')
+    os.makedirs(resources_dir, exist_ok=True)
+    db_path = os.path.join(resources_dir, db_name)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute('''DROP TABLE IF EXISTS incidents''')
+    cursor.execute('''CREATE TABLE incidents (
+        incident_time TEXT,
+        incident_number TEXT,
+        incident_location TEXT,
+        nature TEXT,
+        incident_ori TEXT
+    )''')
+
+    conn.commit()
+    conn.close()
+    print(f"Database '{db_name}' and table 'incidents' created successfully.")
+
+
+def parse_incident_data(text):
+    # Regular expression to capture the data based on your pattern
+    pattern = re.compile(r'(\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2})\s+(\d{4}-\d{8})\s+([A-Z0-9. /;-]+)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+([A-Z0-9]+)$')
+
+
     incidents = []
-    
-    for page in pdf_reader.pages:
-        incidents.extend(extract_incidents_from_page(page))
-    
+    for line in text.splitlines():
+        match = pattern.match(line)
+        if match:
+            date_time = match.group(1)
+            incident_number = match.group(2)
+            location = match.group(3)
+            nature = match.group(4)
+            incident_ori = match.group(5)
+            # Append as a tuple or a list
+            incidents.append((date_time, incident_number, location, nature, incident_ori))
     return incidents
 
-def extract_incidents_from_page(page):
-    text_content = page.extract_text(extraction_mode="layout", 
-                                     layout_mode_space_vertically=False,
-                                     layout_mode_scale_weight=2.0)
-    lines = text_content.split("\n")
-    page_incidents = []
+
+
+
+def populate_db(db_name, incidents):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    resources_dir = os.path.join(parent_dir, 'resources')
+    db_path = os.path.join(resources_dir, db_name)
     
-    for line in lines:
-        if line.strip() and not line.startswith("    "):
-            fields = [field.strip() for field in re.split(r"\s{4,}", line.strip())]
-            if len(fields) == 5:
-                incident = IncidentRecord(*fields)
-            elif len(fields) == 3:
-                incident = IncidentRecord(fields[0], fields[1], "", "", fields[2])
-            else:
-                continue
-            page_incidents.append(incident)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
     
-    return page_incidents
-
-def setup_database():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS police_incidents")
-    cursor.execute(CREATE_TABLE_QUERY)
+    cursor.executemany('''INSERT INTO incidents (incident_time, incident_number, incident_location, nature, incident_ori)
+                          VALUES (?, ?, ?, ?, ?)''', incidents)
+    
     conn.commit()
-    return conn
+    conn.close()
+    
+    print(f"Database '{db_name}' populated with {len(incidents)} records.")
 
-def populate_database(conn, incidents):
+
+
+def status(db_name='normanpd.db'):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    resources_dir = os.path.join(parent_dir, 'resources')
+    db_path = os.path.join(resources_dir, db_name)
+    
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.executemany(INSERT_QUERY, 
-                       [(inc.time, inc.number, inc.location, inc.nature, inc.ori) 
-                        for inc in incidents])
-    conn.commit()
+    
+    #cursor.execute('''SELECT DISTINCT nature FROM incidents''')
+    cursor.execute('''SELECT nature, COUNT(*) FROM incidents GROUP BY nature ORDER BY nature ASC''')
+    results = cursor.fetchall()
 
-def generate_nature_report(conn):
-    cursor = conn.cursor()
-    cursor.execute(NATURE_COUNT_QUERY)
-    return cursor.fetchall()
+    for row in results:
+        print(f"{row[0]} | {row[1]}")
+        #print(f"{row[0]}")
+    
+    conn.close()    
 
-def process_incidents(url):
-    try:
-        incidents = fetch_and_parse_pdf(url)
-        conn = setup_database()
-        populate_database(conn, incidents)
-        
-        nature_report = generate_nature_report(conn)
-        for nature, count in nature_report:
-            print(f"{nature}|{count}")
-        
-        conn.close()
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
+def main(url):
+    fetchincidents(url, "my_downloaded_file.pdf")
+    pdf_text = extract_text_from_pdf("my_downloaded_file.pdf")
+    print(pdf_text)
+    create_db("normanpd.db")
+    incidents = parse_incident_data(pdf_text)
+    print(incidents)
+    populate_db("normanpd.db", incidents)
+    status()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process police incident reports")
-    parser.add_argument("--incidents", type=str, required=True, 
-                        help="URL of the incident summary PDF")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--incidents", type=str, required=True, help="Incident summary url.")
     args = parser.parse_args()
-    
     if args.incidents:
-        process_incidents(args.incidents)
+        main(args.incidents)
     else:
-        print("Please provide a valid incident summary URL")
+        print("Enter valid arguments")
+

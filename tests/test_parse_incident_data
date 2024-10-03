@@ -1,0 +1,16 @@
+from project0.main import parse_incident_data
+
+def test_parse_incident_data():
+    sample_text = """
+    8/1/2024 0:04 2024-00055419 1345 W LINDSEY ST Traffic Stop OK0140200
+    8/1/2024 0:15 2024-00055420 1600 E LINDSEY ST Burglary OK0140200
+    """
+    
+    expected_output = [
+        ('8/1/2024 0:04', '2024-00055419', '1345 W LINDSEY ST', 'Traffic Stop', 'OK0140200'),
+        ('8/1/2024 0:15', '2024-00055420', '1600 E LINDSEY ST', 'Burglary', 'OK0140200')
+    ]
+    
+    incidents = parse_incident_data(sample_text)
+    
+    assert incidents == expected_output, "Incident data parsing failed"
