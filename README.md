@@ -8,6 +8,10 @@ Name: Neil Rajeev John 
 
 pipenv install
 
+## Video Demo on how to run:
+https://github.com/user-attachments/assets/9137fad5-f4a9-4628-a6d9-b9ba842324ba
+
+
 ## How to Run To run the program, use the following command:
 
 pipenv run python project0/main.py --incidents <URL_TO_INCIDENT_SUMMARY>
